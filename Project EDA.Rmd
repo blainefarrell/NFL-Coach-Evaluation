@@ -1,0 +1,445 @@
+---
+title: "Project EDA"
+author: "Blaine Farrell"
+date: "2022-09-21"
+output: html_document
+---
+
+### Some codes for Package
+install.packages("rmarkdown");   
+install.packages("tidyverse");
+install.packages("ggplot2");
+install.packages("RColorBrewer");
+install.packages("kableExtra");
+install.packages("papeR");
+install.packages("epitab");
+
+```{r, include=FALSE}
+library(tidyverse);
+library(ggplot2);
+library(RColorBrewer);
+library(MASS);
+library(knitr);
+library(kableExtra);
+library(RColorBrewer);
+library("papeR");
+library(epitab);
+myPalette <- brewer.pal(8, "Set2") 
+```
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+### Load in the Data
+
+```{r}
+#nflreadr::.clear_cache()
+library(gsisdecoder)
+library(nflfastR)
+library(dplyr, warn.conflicts = FALSE)
+ids <- nflfastR::fast_scraper_schedules(2017:2019) %>%
+  dplyr::filter(game_type == "SB") %>%
+  dplyr::pull(game_id)
+pbp <- nflfastR::build_nflfastR_pbp(ids)
+```
+
+```{r}
+pbp <- nflfastR::load_pbp(2018:2020)
+head(pbp)
+```
+
+
+```{r}
+keep_col = c('home_team','home_coach','away_team','away_coach','posteam','defteam',
+             'wpa','yards_gained','shotgun','no_huddle','qb_dropback','qb_scramble',
+             'pass_location','run_location','run_gap','field_goal_result',
+             'kick_distance','two_point_conv_result','home_timeouts_remaining',
+             'away_timeouts_remaining','timeout','timeout_team','td_team',
+             'total_home_score','total_away_score','extra_point_prob',
+             'two_point_conversion_prob','total_home_epa','total_away_epa',
+             'total_home_rush_epa','total_away_rush_epa','total_home_pass_epa',
+             'total_away_pass_epa','home_wp','away_wp','first_down_rush',
+             'first_down_pass','first_down_penalty','third_down_converted',
+             'third_down_failed','fourth_down_converted','fourth_down_failed',
+             'penalty','rush_attempt','pass_attempt','extra_point_attempt',
+             'two_point_attempt', 'field_goal_attempt','penalty_team',
+             'penalty_yards', 'penalty_type', 'replay_or_challenge',
+             'replay_or_challenge_result','play_type_nfl',
+             'drive_play_count','drive_time_of_possession')
+pbp_epa = subset(pbp, select = keep_col)
+
+head(pbp_epa)
+```
+
+### Fundamental graphical summary for a single variable
+For a single categorical variables: a) bar-graph; b) pie-chart;
+
+For a single numerical variables: a) stem-leaf plot; b) histogram; c) boxplot; d) dot-plot
+
+### Fundamental numerical summary for a single variable
+For a single categorical variables, you can make: frequency table;
+
+For a single numerical variables, you can make: a) sample mean, sample SD, median, and more
+
+### One Categorical var- Graphical Summary - Pie Chart
+
+
+```{r}
+par(mfrow=c(2,2))
+pie(table(pbp_epa$run_location) , main = "Run Location",  col = c(1,2,3))
+pie(table(pbp_epa$run_gap) , main = "Run Gap",  col = c(4,5,6))
+pie(table(pbp_epa$pass_location) , main = "Pass Location", col=rainbow(3))
+pie(table(pbp_epa$play_type_nfl) , main = "Play Type", col=rainbow(13))
+```
+
+
+#### My findings
+I found that Run Location and Pass Location are pretty much evenly split between left, middle, and right. Run Gap has a similar finding to this but is split between Guard, End, and Tackle. Finally, I saw there were A LOT of different play types and will need to use a bar graph to see them all. Even with this though, I saw passes and runs were the most common plays for a team.
+
+
+```{r}
+par(mar=c(5,10,4,1)+.1)
+
+barplot(table(pbp_epa$play_type_nfl), xlab="Count" , main = "Frequency of Each Play Type",las=2, xlim=c(0,9000),horiz=TRUE)
+
+```
+
+
+```{r}
+par(mar=c(15,5,1,1)+.1)
+
+barplot(table(pbp_epa$penalty_type), ylab="Count",beside=TRUE , main = "Frequency of Each Penalty Type",las = 2,cex.names=0.5)
+```
+
+#### My findings
+Disregarding passing and running plays, the most common plays in the NFL are timeout, penalty, punt, kickoff. For penalties, the most common are Offensive Offside and Pass Interference. It is interesting to see how many different penalties are in the NFL since so many of them are so rarely called during a game.
+
+
+```{r}
+par(mfrow=c(2,1))
+
+hist(pbp_epa$drive_play_count, main = "Play Count per Drive", xlab = "Play Count", ylab= "Frequency",col=5)
+barplot(table(pbp_epa$penalty_yards), xlab="Yards", xlim=c(0,26), ylab="Count",col=6)
+```
+
+#### My findings
+Looking at how many plays are in a majority of drives, one can see the majority of drives end in a three and out. This means a lot of drives usually fail in getting a first down and result in only three plays. After this there seems to be a peak in plays in a drive around 6 and it continually declines in frequency afterwards. These longer drives are the ones more likely to end in a score (touchdown or field goal). (Yes I know its a histogram)
+For penalty yards, most penalties result in 5, 10, or 15 yards. This makes sense as the penalties themselves usually state this yard amount in the rule book.
+
+
+```{r}
+barplot(table(pbp_epa$drive_time_of_possession), xlab="Time of Possession",ylab="Count" , main = "Time of Possession per Drive")
+```
+
+#### My findings
+Time of Possession per Drive shows a right-skew distribution with a peak around 1:35. It's interesting to see a huge drop in Time of Possession around the 2 minute mark. This could be influenced by the number of drives ending in 3 and outs since those drives will probably last less than 2 minutes. That lull in the frequency may be the difference between a first down on a drive and no first down on a drive.
+
+
+### One Numerical var - Graphical Summary - Histogram
+```{r}
+par(mfrow=c(3,2))
+hist(pbp_epa$total_home_epa, main = "Home Team EPA", xlab = "EPA", ylab= "Frequency",col=2)
+hist(pbp_epa$total_away_epa, main = "Away Team EPA", xlab = "EPA", ylab= "Frequency",col=4)
+hist(pbp_epa$total_home_pass_epa, main = "Passing EPA", xlab = "EPA", ylab= "Frequency",col=5)
+hist(pbp_epa$total_away_pass_epa, main = "Rushing EPA", xlab = "EPA", ylab= "Frequency",col=5)
+hist(pbp_epa$kick_distance, main = "Kick Distance", xlab = "Distance", ylab= "Frequency",col=3)
+hist(pbp_epa$yards_gained, main = "Yards Gained per Play",xlim=c(-20,55), xlab = "Yards", ylab= "Frequency",col=4)
+
+```
+
+#### My Findings
+Looking at the data, both Home team EPA and Away team EPA seem very similar. The distribution of passing EPA and rushing EPA also show a similar pattern as well.
+For the frequency of Kick Distance, most kicks seem to be around the 30 yard line which makes sense as that is a high probability kick and also the distance where the Extra Point is kicked. Lastly, the Yards Gained per Play seems most frequently to be a negative yard play. This may be due to sacks, running plays for a loss, spikes, and QB kneels. The next biggest peak are yard games within 0-5 yards which makes more sense due to short passes and the average yardage per rush.
+
+
+```{r}
+par(mfrow=c(2,2))
+boxplot(pbp_epa$kick_distance,horizontal=TRUE, main = "Kick Distance", xlab = "Distance", ylab= "Frequency",col=2)
+boxplot(pbp_epa$yards_gained,horizontal=TRUE, main = "Yards Gained per Play", xlab = "Yards", ylab= "Frequency",col=3)
+boxplot(pbp_epa$drive_play_count,horizontal=TRUE, main = "Play Count per Drive", xlab = "Play Number", ylab= "Frequency",col=4)
+boxplot(pbp_epa$penalty_yards,horizontal=TRUE, main = "Yards per Penalty", xlab = "Yards", ylab= "Frequency",col=5)
+```
+
+#### My findings
+The mean for Kick Distance in the NFL looks to be around 40 yards with a small IQR but a large range. Inspecting Play Count per Drive, the average drive seems to be 6-7 plays with a skew right as many of the scoring drives tend to be longer than that many plays.
+For yards gained per play there is a huge amount of variance in the bottom and top 25% of yards per play, but the middle 50% of plays is centered around 0-5 yards. A similar pattern is seen for Yards per Penalty as the majority of Penalties are 5-10 yards but there are a lot of outliers with some the way up to 55 yards (a huge difference).
+
+
+### Boxplot of NFL Team and Play Efficiency
+
+```{r}
+par(mfrow=c(2,2))
+
+boxplot(pbp_epa$total_home_epa, pbp_epa$total_away_epa, ylab = "EPA", names = c("Home EPA", "Away EPA"), col=myPalette)
+boxplot(pbp_epa$home_wp, pbp_epa$away_wp, ylab = "Win %", names = c("Home WP", "Away WP"), col=myPalette)
+boxplot(pbp_epa$total_home_pass_epa, pbp_epa$total_home_rush_epa, ylab = "EPA", names = c("Pass EPA", "Rush EPA"), col=myPalette)
+boxplot(pbp_epa$total_home_score, pbp_epa$total_away_score, ylab = "Score", names = c("Home Score", "Away Score"), col=myPalette)
+```
+
+#### My Findings
+Looking at Home EPA & Home Score vs. Away EPA & Away Score, there seems to be no difference between the two. Home Field seems to have no difference in the value of a team winning a game until you look at the win percentage between the two. For Win Percentage, Home teams seem to have a slight edge over the Away team.
+An analysis on the difference of Pass EPA and Rush EPA was also considered, this provided insight into the variability of passing and rushing plays. Although they share a similar mean, passing plays appear to be more boom or bust play options, whereas, running plays tend to be a safer bet with less variance.
+
+
+
+### Linear Model
+```{r}
+model <- lm(home_wp ~ total_home_pass_epa, data = pbp_epa)
+print(model$coefficients)
+plot(pbp_epa$total_home_pass_epa, pbp_epa$home_wp, xlab = "Pass EPA", ylab = "Team Win %", col='blue')
+abline(model, col='black') #specify color of regression line
+```
+
+
+```{r}
+model <- lm(home_wp ~ total_home_rush_epa, data = pbp_epa)
+print(model$coefficients)
+plot(pbp_epa$total_home_rush_epa, pbp_epa$home_wp, ylab = "Team Win %", xlab = "Rush EPA", col='blue')
+abline(model, col='black')
+```
+
+
+#### My findings
+Both Pass EPA and Rush EPA look to have a positive linear relationship with a Team's Win %. Although, these EPA values have very similar slopes, Pass EPA seems to have less variance and error with its trend.
+
+
+### To-do-list-2 #
+
+### One Categorical Var- Numerical Summary- Frequency Table
+
+summary(pbp_epa)
+
+
+```{r echo = TRUE, results = 'asis'}
+names <- c("play_type_nfl","run_location","run_gap","pass_location")
+pbp_epa[,names] <- lapply(pbp_epa[,names] , factor)
+knitr::kable(xtable(summarize(pbp_epa[,names], type = "factor", caption = "Data Summary for categorical variables in Students")))
+```
+
+
+#### My findings
+The findings in the summary are similar to what was found above in the bar graphs. This view does a great job at showing the percentages of each value within a column to produce a frequency plot.
+
+### One Numerical var - Numerical Summary - 5 summary
+```{r echo = TRUE, results = 'asis'}
+names <- c("total_home_epa","total_away_epa","penalty_yards","kick_distance",
+           "drive_play_count","yards_gained")
+knitr::kable(xtable(summarize(pbp_epa[,names], caption = "Data Summary for numerical variables in Students")))
+```
+
+#### My findings
+These findings are very similar to the box plots found above, but with numerical values. This presentation of the data also does not provide any outliers that may exist and only shows the maximum, even if it is an outlier.
+
+
+## Fundamental numerical summary for two variables
+```{r}
+names <- c("total_home_epa","total_home_score","home_wp",
+           "total_home_rush_epa","total_home_pass_epa")
+(CORR=cor(pbp_epa[,names]))
+```
+
+#### My findings
+Total Home EPA, Home WP, and Home Pass EPA seem to be very highly correlated to each other.
+
+
+### To-do-list-3 #
+For the "Students" dataset, explore numerically important association between any two variables and recognize such patterns. Then draw  conclusions on your findings.
+
+
+### Two Categorical Var - Numerical Summary - Contingency Table
+```{r}
+table(pbp_epa$run_location, pbp_epa$run_gap)
+table(pbp_epa$no_huddle, pbp_epa$pass_location)
+table(pbp_epa$qb_scramble, pbp_epa$run_location)
+table(pbp_epa$shotgun, pbp_epa$pass_location)
+
+#too many types to show but analysis below!
+#table(pbp_epa$penalty_yards, pbp_epa$penalty_type)
+```
+
+
+
+
+```{r}
+par(mfrow=c(2,2))
+mosaicplot(run_location~run_gap,data=pbp_epa, col=c('blue','pink'))
+mosaicplot(run_location~qb_scramble,data=pbp_epa, col=c('blue','pink'))
+mosaicplot(pass_location~no_huddle,data=pbp_epa, col=c('blue','pink'))
+mosaicplot(pass_location~shotgun,data=pbp_epa, col=c('blue','pink'))
+
+```
+
+#### My findings
+This data shows that not a lot of the run locations go through the middle gap and QB scrambles tend to go through all three locations. For penalties, most penalties have an assigned distance and that is what is most common to see (a lot of 5, 10, and 15), but they sometimes deviate from those rules based on the yards gained on the play. Looking at passing plays, both shotgun formation and no huddle plays result in more passes to the left and right of the field although a large chunk is still thrown to the middle of the field. It also shows that a majority of pass plays are shotgun formation and not no huddle plays.
+
+
+
+### To-do-list-4 #
+For the "pbp_epa" dataset, explore graphically important association between any two variables and recognize such patterns. Then draw conclusions on your findings.
+
+
+## Fundamental grahically summary for two variables
+For two variables, you can explore any two variables with scatter plots. For example, you can consider the following codes:
+```{r}
+names <- c("total_home_epa","total_home_score","home_wp",
+           "total_home_rush_epa","total_home_pass_epa")
+pairs(pbp_epa[,names], col="darkgreen")
+```
+
+You can also use heatmap for graphical summary:
+```{r}
+par(mar=c(1,1,4,10)+.1)
+names <- c("total_home_epa","total_home_score","home_wp",
+           "total_home_rush_epa","total_home_pass_epa")
+CORR=cor(pbp_epa[,names])
+heatmap(cor(pbp_epa[,names]),cexRow=1.0,cexCol=1.0,Colv=NA,margins=c(10,10))
+```
+
+#### My findings
+Most of this data shows a positive correlation, but just like the correlation plot above, Home EPA, Home Win %, and Pass EPA are all super highly correlated to each other.
+
+```{r}
+lessnames = c("total_home_epa", "home_wp", "total_home_score","total_away_epa", "away_wp",
+              "total_away_score")
+CORR=cor(pbp_epa[,lessnames])
+heatmap(cor(pbp_epa[,lessnames]),cexRow=1.0,cexCol=1.0,Colv=NA,margins=c(10,10))
+```
+
+#### My findings
+All of the Home Team features seem to be highly correlated to the other Home Team features, but not very correlated to the Away team features. The Away Team features also produce a similar finding.
+
+
+### Two Categorical Var - Graphical Summary - side-to-side Bar graph
+```{r}
+barplot(table(pbp_epa$run_gap, pbp_epa$run_location, dnn=c("Run Gap","Run Location")), ylab="Run Location", xlab="Run Gap",  main="Rushing", beside=TRUE, width=.3, col=c("turquoise4", "turquoise2", "blue2"))
+
+legend("right", title="Run", fill =c("turquoise4", "turquoise2", "blue2") , box.lty=0,legend=c("end","guard","tackle"))
+
+```
+
+
+#### My findings
+In this bar chart, it is shown that left runs are more likely to be run through the end gap of the offensive line and that right run are more likely to be run through the guard gap.
+
+
+
+```{r}
+dropvsscram <- table(pbp_epa$pass_location,pbp_epa$shotgun)
+
+barplot(dropvsscram, ylab="Frequency", xlab="Shotgun Formation", main="Location of Shotgun Passes", col=myPalette[1:4], beside=TRUE) 
+
+legend("topleft",  rownames(dropvsscram), fill =myPalette[1:4], box.lty=0)
+```
+
+#### My Findings
+This shows a similar result to above where most passing plays, whether shotgun formation or not, go to the left or the right, and less to the middle. It also shows that more pass plays occur when a team is in shotgun formation as opposed to not.
+
+
+### Two Numerical Var - Graphical Summary - Scatter Plot
+```{r}
+
+plot(pbp_epa$total_home_pass_epa, pbp_epa$home_wp, main= "Team Win % and Pass EPA", xlab="Win %", ylab="Pass EPA", pch=10)
+lines(lowess(pbp_epa$total_home_pass_epa, pbp_epa$home_wp), col="red")
+```
+
+#### My findings
+There is still a positive trend between Win % and Pass EPA, although there does not seem to be much change in the variance as they both increase.
+
+#### Coaches
+```{r}
+
+pbp_epa$drive_time_of_possession1<-with(as.POSIXlt(pbp_epa$drive_time_of_possession,format='%M:%S'),60*min +sec)
+#(pbp_epa$drive_time_of_possession1)
+```
+
+
+
+```{r}
+coach <- aggregate(select_if(pbp_epa, is.numeric), list(pbp_epa$home_coach), FUN=mean, na.rm=TRUE, na.omit=TRUE, na.action=NULL
+)
+head(coach)
+```
+
+
+```{r}
+plot(x = coach$total_home_pass_epa, y = coach$total_home_rush_epa,
+    xlab = "Pass EPA",
+    ylab = "Rush EPA",
+    xlim = c(-15,8),
+    ylim = c(-5,5),
+    main = "Offensive Efficiency of Head Coaches"
+)
+text(coach$total_home_pass_epa, coach$total_home_rush_epa, 
+     cex=0.5,labels=coach$Group.1, pos=3)
+
+```
+
+```{r}
+plot(x = coach$total_away_pass_epa, y = coach$total_away_rush_epa,
+    xlab = "Pass EPA",
+    ylab = "Rush EPA",
+    xlim = c(-8,15),
+    ylim = c(-3,5),
+    main = "Defensive Efficiency of Head Coaches"
+)
+text(coach$total_away_pass_epa, coach$total_away_rush_epa, 
+     cex=0.5,labels=coach$Group.1, pos=3)
+
+```
+
+```{r}
+plot(x = coach$pass_attempt, y = coach$rush_attempt,
+    xlab = "Pass Attempt",
+    ylab = "Rush Attempt",
+    xlim = c(.39,.49),
+    ylim = c(.25,.37),
+    main = "Preferred Play Type"
+)
+text(coach$pass_attempt, coach$rush_attempt, 
+     cex=0.5,labels=coach$Group.1, pos=3)
+
+```
+
+
+```{r}
+plot(x = coach$drive_time_of_possession1, y = coach$drive_play_count,
+    xlab = "Time of Posession per Drive",
+    ylab = "Number of Plays per Drive",
+    xlim = c(168,235),
+    ylim = c(6.45,8.75),
+    main = "Drive Information"
+)
+text(coach$drive_time_of_possession1, coach$drive_play_count, 
+     cex=0.5,labels=coach$Group.1, pos=3)
+
+```
+```{r}
+plot(x = coach$yards_gained, y = coach$drive_play_count,
+    xlab = "Yards Gained per Play",
+    ylab = "Number of Plays per Drive",
+    xlim = c(3.5,5.1),
+    ylim = c(6.45,8.6),
+    main = "Yards per Play vs Plays per Drive"
+)
+text(coach$yards_gained, coach$drive_play_count, 
+     cex=0.5,labels=coach$Group.1, pos=3)
+
+```
+
+```{r}
+plot(x = coach$total_home_score, y = coach$total_away_score,
+    xlab = "Points Scored per Game",
+    ylab = "Points Scored Against per Game",
+    xlim = c(5.8,16.5),
+    ylim = c(8,22.75),
+    main = "Game Scores"
+)
+text(coach$total_home_score, coach$total_away_score, 
+     cex=0.71,labels=coach$Group.1, pos=3)
+
+```
+
+
+

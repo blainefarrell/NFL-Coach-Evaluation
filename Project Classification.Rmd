@@ -1,0 +1,449 @@
+---
+title: "Project Classification"
+author: "Blaine Farrell"
+date: "2022-10-07"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+### Some codes for Package
+install.packages("rmarkdown");   
+install.packages("tidyverse");
+install.packages("ggplot2");
+install.packages("RColorBrewer");
+install.packages("kableExtra");
+install.packages("papeR");
+install.packages("epitab");
+
+```{r, include=FALSE}
+library(tidyverse);
+library(ggplot2);
+library(RColorBrewer);
+library(MASS);
+library(knitr);
+library(kableExtra);
+library(RColorBrewer);
+library("papeR");
+library(epitab);
+library(caret);
+myPalette <- brewer.pal(8, "Set2") 
+```
+
+
+##### Load in the Data and Preparation #####
+
+```{r}
+#nflreadr::.clear_cache()
+library(gsisdecoder)
+library(nflfastR)
+library(dplyr, warn.conflicts = FALSE)
+ids <- nflfastR::fast_scraper_schedules(2017:2019) %>%
+  dplyr::filter(game_type == "SB") %>%
+  dplyr::pull(game_id)
+pbp <- nflfastR::build_nflfastR_pbp(ids)
+```
+
+
+```{r}
+pbp <- nflfastR::load_pbp(2018:2020)
+head(pbp)
+```
+
+
+
+```{r}
+keep_col = c('home_team','home_coach','season','away_team','away_coach','posteam','defteam',
+             'yards_gained','shotgun','no_huddle','qb_dropback','qb_scramble',
+             'pass_location','run_location','run_gap','field_goal_result',
+             'kick_distance','two_point_conv_result','timeout','timeout_team',
+             'td_team','total_home_score','total_away_score','total_home_epa',
+             'total_away_epa','total_home_rush_epa','total_away_rush_epa',
+             'total_home_pass_epa','total_away_pass_epa','home_wp','away_wp',
+             'first_down_rush','first_down_pass','first_down_penalty',
+             'third_down_converted','third_down_failed','fourth_down_converted',
+             'fourth_down_failed','penalty','rush_attempt','pass_attempt','touchdown',
+             'pass_touchdown','rush_touchdown','penalty_team',
+             'penalty_yards','replay_or_challenge_result','play_type_nfl',
+             'drive_play_count','drive_time_of_possession')
+pbp_epa = subset(pbp, select = keep_col)
+```
+
+```{r}
+#CHANGE LOCATION VARIABLES TO NUMERIC
+
+pbp_epa$pass_location[pbp_epa$pass_location == "left"] <- -5
+pbp_epa$pass_location[pbp_epa$pass_location == "middle"] <- 0
+pbp_epa$pass_location[pbp_epa$pass_location == "right"] <- 5
+
+pbp_epa$run_location[pbp_epa$run_location == "left"] <- -5
+pbp_epa$run_location[pbp_epa$run_location == "middle"] <- 0
+pbp_epa$run_location[pbp_epa$run_location == "right"] <- 5
+
+pbp_epa$run_gap[pbp_epa$run_gap == "guard"] <- 0
+pbp_epa$run_gap[pbp_epa$run_gap == "tackle"] <- 1
+pbp_epa$run_gap[pbp_epa$run_gap == "end"] <- 2
+
+pbp_epa$replay_or_challenge_result[pbp_epa$replay_or_challenge_result == "reversed"] <- 1
+pbp_epa$replay_or_challenge_result[pbp_epa$replay_or_challenge_result == "upheld"] <- 0
+pbp_epa$replay_or_challenge_result[pbp_epa$replay_or_challenge_result == "denied"] <- 0
+
+pbp_epa$two_point_conv_result[pbp_epa$two_point_conv_result == "failure"] <- 0
+pbp_epa$two_point_conv_result[pbp_epa$two_point_conv_result == "success"] <- 1
+
+pbp_epa$field_goal_result[pbp_epa$field_goal_result == "missed"] <- 0
+pbp_epa$field_goal_result[pbp_epa$field_goal_result == "blocked"] <- 0
+pbp_epa$field_goal_result[pbp_epa$field_goal_result == "made"] <- 1
+
+
+```
+
+
+```{r}
+#CONVERT TIME OF POSSESSION INTO SECONDS
+
+pbp_epa$drive_time_of_possession1<-with(as.POSIXlt(pbp_epa$drive_time_of_possession,format='%M:%S'),60*min +sec)
+
+head(pbp_epa)
+```
+
+
+##### Coaches Dataset #####
+
+```{r}
+coach_sum <- aggregate(select_if(pbp_epa, is.numeric),  
+                       list(pbp_epa$home_coach,pbp_epa$season), 
+                       FUN=sum, na.rm=TRUE, na.omit=TRUE, na.action=NULL
+)
+coach_sum$Group.1 <- paste(coach_sum$Group.1,coach_sum$Group.2,sep="_")
+
+sum_col = c('Group.1','timeout','penalty','touchdown')
+coach_sum = subset(coach_sum, select = sum_col)
+
+head(coach_sum)
+```
+
+```{r}
+coach_mean <- aggregate(select_if(pbp_epa, is.numeric), 
+                        list(pbp_epa$home_coach,pbp_epa$season), 
+                        FUN=mean, na.rm=TRUE, na.omit=TRUE, na.action=NULL)
+
+#coach_mean = subset(coach_mean, select = -c())
+remove_cols = c('timeout','penalty')
+coach_mean = subset(coach_mean, select = !(names(coach_mean) %in% remove_cols)) 
+
+```
+
+```{r}
+# CLEAN COACH MEAN
+#coach_mean$pass_touchdown1 <- coach_mean$pass_touchdown / coach_mean$touchdown
+#coach_mean$rush_touchdown1 <- coach_mean$rush_touchdown / coach_mean$touchdown
+coach_mean$third_conversion1 <- coach_mean$third_down_converted / (coach_mean$third_down_converted + coach_mean$third_down_failed)
+coach_mean$fourth_conversion1 <- coach_mean$fourth_down_converted / (coach_mean$fourth_down_converted + coach_mean$fourth_down_failed)
+#coach_mean$first_down_rush1 <- coach_mean$first_down_rush / (coach_mean$first_down_rush + coach_mean$first_down_pass + coach_mean$first_down_penalty)
+#coach_mean$first_down_pass1 <- coach_mean$first_down_pass / (coach_mean$first_down_rush + coach_mean$first_down_pass + coach_mean$first_down_penalty)
+#coach_mean$first_down_penalty1 <- coach_mean$first_down_penalty / (coach_mean$first_down_rush + coach_mean$first_down_pass + coach_mean$first_down_penalty)
+
+```
+
+
+```{r}
+remove <- c('pass_touchdown','rush_touchdown','third_down_converted',
+            'third_down_failed','fourth_down_converted','fourth_down_failed',
+            'first_down_pass','first_down_rush','first_down_penalty',
+            'kick_distance','field_goal_attempt','total_away_epa','total_away_rush_epa',
+            'total_away_pass_epa','away_wp','touchdown','Group.2','season')
+
+coach_mean$Group.1 <- paste(coach_mean$Group.1,coach_mean$Group.2,sep="_")
+coach_mean1 <- subset(coach_mean, select = !(names(coach_mean) %in% remove)) 
+
+head(coach_mean1)
+```
+
+##### Final Dataset #####
+
+```{r}
+coach <- merge(coach_mean1, coach_sum, by="Group.1")
+keep_columns <- c('Group.1','home_wp','yards_gained','shotgun','no_huddle','qb_dropback',
+               'qb_scramble','rush_attempt','pass_attempt','penalty_yards',
+               'drive_play_count','drive_time_of_possession1','third_conversion1',
+               'fourth_conversion1','timeout','penalty')
+coach = subset(coach, select = keep_columns)
+
+head(coach)
+
+
+write.csv(coach,"C:\\Users\\Admin\\OneDrive\\Documents\\CLASSES\\FALL 2022\\STT450\\Project\\coach_dataset.csv", row.names = FALSE)
+
+```
+
+
+##### Classification #####
+
+```{r}
+coach <- read.csv("coach_dataset.csv")
+
+dim(coach)
+```
+
+
+
+```{r}
+cor(coach[,-1],coach$home_wp)
+```
+
+
+
+```{r}
+med<-median(coach$home_wp)
+coach$wp01 <- ifelse(coach$home_wp>med, 1, 0)
+head(coach)
+```
+
+
+
+Train and Test data Split:
+```{r}
+set.seed(100)
+
+#use 50% of the data for train and 50% for test
+sample <- sample(c(TRUE, FALSE), nrow(coach), replace=TRUE, prob=c(0.5,0.5))
+train <- coach[sample, ]
+test.year <- coach[!sample, ]
+dim(test.year)
+
+test.coach <- test.year$wp01
+```
+
+
+```{r}
+library(MASS)
+```
+
+
+##### LDA Analysis #####
+
+  ### ALL
+
+```{r}
+start.time <- Sys.time()
+
+lda.fit <- lda(wp01 ~  yards_gained+shotgun+no_huddle+qb_dropback+
+               qb_scramble+rush_attempt+pass_attempt+penalty_yards+
+               drive_play_count+drive_time_of_possession1+third_conversion1+
+               fourth_conversion1+timeout+penalty, data = coach)
+lda.class <- predict(lda.fit, test.year)$class
+table(lda.class, test.coach)
+mean(lda.class == test.coach)
+1 - mean(lda.class == test.coach)
+
+end.time <- Sys.time()
+time.taken <- end.time - start.time
+time.taken
+```
+
+
+  ### 50 50 
+
+```{r}
+start.time <- Sys.time()
+
+lda.fit50 <- lda(wp01 ~  yards_gained+shotgun+no_huddle+qb_dropback+
+               qb_scramble+rush_attempt+pass_attempt+penalty_yards+
+               drive_play_count+drive_time_of_possession1+third_conversion1+
+               fourth_conversion1+timeout+penalty, data = train)
+lda.class50 <- predict(lda.fit50, test.year)$class
+table(lda.class50, test.coach)
+mean(lda.class50 == test.coach)
+1 - mean(lda.class50 == test.coach)
+
+
+
+end.time <- Sys.time()
+time.taken <- end.time - start.time
+time.taken
+```
+
+
+##### QDA Analysis #####
+
+  ### ALL
+
+```{r}
+start.time <- Sys.time()
+
+
+
+
+qda.fit <- qda(wp01 ~  yards_gained+shotgun+no_huddle+qb_dropback+
+               qb_scramble+rush_attempt+pass_attempt+penalty_yards+
+               drive_play_count+drive_time_of_possession1+third_conversion1+
+               fourth_conversion1+timeout+penalty, data = coach)
+qda.class <- predict(qda.fit, test.year)$class
+table(qda.class, test.coach)
+mean(qda.class == test.coach)
+1 - mean(qda.class == test.coach)
+
+
+end.time <- Sys.time()
+time.taken <- end.time - start.time
+time.taken
+```
+
+
+  ### 50 50
+
+
+```{r}
+start.time <- Sys.time()
+
+qda.fit50 <- qda(wp01 ~  yards_gained+shotgun+no_huddle+qb_dropback+
+               qb_scramble+rush_attempt+pass_attempt+penalty_yards+
+               drive_play_count+drive_time_of_possession1+third_conversion1+
+               fourth_conversion1+timeout+penalty, data = train)
+qda.class50 <- predict(qda.fit50, test.year)$class
+table(qda.class50, test.coach)
+mean(qda.class50 == test.coach)
+1 - mean(qda.class50 == test.coach)
+
+
+end.time <- Sys.time()
+time.taken <- end.time - start.time
+time.taken
+```
+
+
+##### Logistic Regression Analysis #####
+
+
+  ### ALL
+
+```{r}
+start.time <- Sys.time()
+
+glm.fits <- glm(wp01 ~  yards_gained+shotgun+no_huddle+qb_dropback+
+               qb_scramble+rush_attempt+pass_attempt+penalty_yards+
+               drive_play_count+drive_time_of_possession1+third_conversion1+
+               fourth_conversion1+timeout+penalty, data = coach,
+               family=binomial)
+glm.probs <- predict(glm.fits, test.year, type = "response")
+glm.pred <- rep(0, length(test.coach))
+glm.pred[glm.probs > .5] <- 1
+table(glm.pred, test.coach)
+acc <- (16+21)/52
+acc
+
+
+end.time <- Sys.time()
+time.taken <- end.time - start.time
+time.taken
+```
+
+
+  ### 50 50
+
+```{r}
+start.time <- Sys.time()
+
+glm.fits50 <- glm(wp01 ~  yards_gained+shotgun+no_huddle+qb_dropback+
+               qb_scramble+rush_attempt+pass_attempt+penalty_yards+
+               drive_play_count+drive_time_of_possession1+third_conversion1+
+               fourth_conversion1+timeout+penalty, data = train,
+               family=binomial)
+glm.probs50 <- predict(glm.fits50, test.year, type = "response")
+glm.pred50 <- rep(0, length(test.coach))
+glm.pred50[glm.probs50 > .5] <- 1
+table(glm.pred50, test.coach)
+acc <- (16+12)/52
+acc
+
+
+end.time <- Sys.time()
+time.taken <- end.time - start.time
+time.taken
+```
+
+
+##### KNN Analysis #####
+
+  ### ALL
+
+
+
+```{r}
+library(class)
+
+for (i in 1: 10)
+{
+  start.time <- Sys.time()
+
+      train.test <- cbind(coach$yards_gained,coach$shotgun,coach$no_huddle,
+               coach$qb_dropback,coach$qb_scramble,coach$rush_attempt,
+               coach$pass_attempt,coach$penalty_yards,coach$drive_play_count,
+               coach$drive_time_of_possession1,coach$third_conversion1,
+               coach$fourth_conversion1,coach$timeout,coach$penalty)
+      
+      set.seed(1)
+      knn.pred <- knn(train.test, train.test, coach$wp01, k = i)
+      
+      conf.matrix<-table(knn.pred, coach$wp01)
+      print(i)
+      print(mean(knn.pred == coach$wp01))
+      print(sensitivity(conf.matrix))
+      print(specificity(conf.matrix))
+      
+      
+      
+  end.time <- Sys.time()
+  time.taken <- end.time - start.time
+  print(time.taken)
+}
+
+```
+
+
+
+  ### 50 50
+
+
+```{r}
+for (i in 1: 10)
+{
+  start.time <- Sys.time()
+
+    train.X <- cbind(train$yards_gained,train$shotgun,train$no_huddle,
+               train$qb_dropback,train$qb_scramble,train$rush_attempt,
+               train$pass_attempt,train$penalty_yards,train$drive_play_count,
+               train$drive_time_of_possession1,train$third_conversion1,
+               train$fourth_conversion1,train$timeout,train$penalty) #[train, ]
+    test.X <- cbind(test.year$yards_gained,test.year$shotgun,test.year$no_huddle,
+               test.year$qb_dropback,test.year$qb_scramble,test.year$rush_attempt,
+               test.year$pass_attempt,test.year$penalty_yards,test.year$drive_play_count,
+               test.year$drive_time_of_possession1,test.year$third_conversion1,
+               test.year$fourth_conversion1,test.year$timeout,test.year$penalty)
+
+    train.wp01 <- train$wp01
+  
+    set.seed(1)
+    knn.pred <- knn(train.X, test.X, train.wp01, k = i)
+
+    conf.matrix50<-table(knn.pred, test.year$wp01)
+    print(i)
+    print(mean(knn.pred == test.year$wp01))
+    print(sensitivity(conf.matrix50))
+    print(specificity(conf.matrix50))
+    
+    
+  end.time <- Sys.time()
+  time.taken <- end.time - start.time
+  print(time.taken)
+}
+
+
+```
+
+
+
