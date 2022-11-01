@@ -1,0 +1,534 @@
+---
+title: "Group_Project_3_FARRELL"
+author: "Blaine Farrell"
+date: "2022-10-21"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+### Some codes for Package
+install.packages("rmarkdown");   
+install.packages("tidyverse");
+install.packages("ggplot2");
+install.packages("RColorBrewer");
+install.packages("kableExtra");
+install.packages("papeR");
+install.packages("epitab");
+
+```{r, include=FALSE}
+library(tidyverse);
+library(ggplot2);
+library(RColorBrewer);
+library(MASS);
+library(knitr);
+library(kableExtra);
+library(RColorBrewer);
+library("papeR");
+library(epitab);
+library(caret);
+library(boot);
+myPalette <- brewer.pal(8, "Set2") 
+```
+
+
+##### Import Dataset #####
+
+```{r}
+coach <- read.csv("coach_dataset.csv")
+```
+
+
+```{r}
+med<-median(coach$home_wp)
+coach$wp01 <- ifelse(coach$home_wp>med, 1, 0)
+head(coach)
+```
+
+
+Train and Test data Split:
+```{r}
+set.seed(100)
+
+#use 50% of the data for train and 50% for test
+sample <- sample(c(TRUE, FALSE), nrow(coach), replace=TRUE, prob=c(0.5,0.5))
+train <- coach[sample, ]
+test.year <- coach[!sample, ]
+dim(test.year)
+
+test.coach <- test.year$wp01
+```
+
+
+
+
+##### LDA CV #####
+
+  ### 5-fold
+  
+```{r}
+start.time <- Sys.time()
+
+set.seed(17)
+cv.er.5lda=rep(0,5)
+l.sp <- NULL
+l.sn <- NULL
+
+for (i in 1:5){
+  lda.fit <- glm(wp01 ~  yards_gained+shotgun+no_huddle+qb_dropback+
+               qb_scramble+rush_attempt+pass_attempt+penalty_yards+
+               drive_play_count+drive_time_of_possession1+third_conversion1+
+               fourth_conversion1+timeout+penalty, data = coach)
+  cv.er.5lda[i]=cv.glm(coach,lda.fit,K=5)$delta[1]
+  
+  glm.probs50 <- predict(lda.fit, test.year, type = "response")
+glm.pred50 <- rep(0, length(test.coach))
+glm.pred50[glm.probs50 > .5] <- 1
+conf.matrix<-table(glm.pred50, test.coach)
+
+l.sp = c(l.sp,specificity(conf.matrix))
+l.sn = c(l.sn,sensitivity(conf.matrix))
+}
+
+cv.er.5lda
+
+end.time <- Sys.time()
+time.taken <- end.time - start.time
+time.taken
+```
+
+
+```{r}
+mean(cv.er.5lda)
+sd(cv.er.5lda)
+boxplot(cv.er.5lda)
+```
+
+
+  ### 5-fold 
+
+```{r}
+start.time <- Sys.time()
+
+
+set.seed(17)
+cv.er.5lda50=rep(0,5)
+l.sn50 <- NULL
+l.sp50 <- NULL
+
+for (i in 1:5){
+lda.fit50 <- glm(wp01 ~  yards_gained+shotgun+no_huddle+qb_dropback+
+               qb_scramble+rush_attempt+pass_attempt+penalty_yards+
+               drive_play_count+drive_time_of_possession1+third_conversion1+
+               fourth_conversion1+timeout+penalty, data = train)
+
+  cv.er.5lda50[i]=cv.glm(train,lda.fit50,K=5)$delta[1]
+  
+glm.probs50 <- predict(lda.fit50, test.year, type = "response")
+glm.pred50 <- rep(0, length(test.coach))
+glm.pred50[glm.probs50 > .5] <- 1
+conf.matrix<-table(glm.pred50, test.coach)
+
+l.sp50 = c(l.sp50,specificity(conf.matrix))
+l.sn50 = c(l.sn50,sensitivity(conf.matrix))
+}
+
+cv.er.5lda50
+
+end.time <- Sys.time()
+time.taken <- end.time - start.time
+time.taken
+```
+
+
+```{r}
+mean(cv.er.5lda50)
+sd(cv.er.5lda50)
+boxplot(cv.er.5lda50)
+```
+
+
+
+##### QDA CV #####
+
+  ### 5-fold
+
+```{r}
+start.time <- Sys.time()
+
+set.seed(17)
+cv.er.5qda=rep(0,5)
+q.sn <- NULL
+q.sp <- NULL
+
+for (i in 1:5){
+  qda.fit <- glm(wp01 ~  poly(yards_gained+shotgun+no_huddle+qb_dropback+
+               qb_scramble+rush_attempt+pass_attempt+penalty_yards+
+               drive_play_count+drive_time_of_possession1+third_conversion1+
+               fourth_conversion1+timeout+penalty,2), data = coach)
+  cv.er.5qda[i]=cv.glm(coach,qda.fit,K=5)$delta[1]
+  
+glm.probs50 <- predict(qda.fit, test.year, type = "response")
+glm.pred50 <- rep(0, length(test.coach))
+glm.pred50[glm.probs50 > .5] <- 1
+conf.matrix<-table(glm.pred50, test.coach)
+
+q.sp = c(q.sp,specificity(conf.matrix))
+q.sn = c(q.sn,sensitivity(conf.matrix))
+ }
+cv.er.5qda
+
+
+end.time <- Sys.time()
+time.taken <- end.time - start.time
+time.taken
+```
+
+```{r}
+mean(cv.er.5qda)
+sd(cv.er.5qda)
+boxplot(cv.er.5qda)
+```
+
+
+  ### LOO
+
+
+```{r}
+start.time <- Sys.time()
+
+
+set.seed(17)
+cv.er.5qda50=rep(0,5)
+q.sn50 <- NULL
+q.sp50 <- NULL
+
+for (i in 1:5){
+  qda.fit50 <- glm(wp01 ~  poly(yards_gained+shotgun+no_huddle+qb_dropback+
+               qb_scramble+rush_attempt+pass_attempt+penalty_yards+
+               drive_play_count+drive_time_of_possession1+third_conversion1+
+               fourth_conversion1+timeout+penalty,2), data = train)
+  cv.er.5qda50[i]=cv.glm(train,qda.fit50,K=5)$delta[1]
+  
+glm.probs50 <- predict(qda.fit50, test.year, type = "response")
+glm.pred50 <- rep(0, length(test.coach))
+glm.pred50[glm.probs50 > .5] <- 1
+conf.matrix<-table(glm.pred50, test.coach)
+
+q.sp50 = c(q.sp50,specificity(conf.matrix))
+q.sn50 = c(q.sn50,sensitivity(conf.matrix))
+ }
+cv.er.5qda50
+
+end.time <- Sys.time()
+time.taken <- end.time - start.time
+time.taken
+```
+
+
+```{r}
+mean(cv.er.5qda50)
+sd(cv.er.5qda50)
+boxplot(cv.er.5qda50)
+```
+
+
+
+
+##### Log Reg CV #####
+
+
+  ### 5-fold
+
+```{r}
+start.time <- Sys.time()
+
+
+set.seed(17)
+cv.error.5lg=rep(0,5)
+lg.sp <- NULL
+lg.sn <- NULL
+
+for (i in 1:5){
+glm.fits <- glm(wp01 ~  yards_gained+shotgun+no_huddle+qb_dropback+
+               qb_scramble+rush_attempt+pass_attempt+penalty_yards+
+               drive_play_count+drive_time_of_possession1+third_conversion1+
+               fourth_conversion1+timeout+penalty, data = coach,
+               family=binomial)
+  cv.error.5lg[i]=cv.glm(coach,glm.fits,K=5)$delta[1]
+
+glm.probs50 <- predict(glm.fits, test.year, type = "response")
+glm.pred50 <- rep(0, length(test.coach))
+glm.pred50[glm.probs50 > .5] <- 1
+conf.matrix<-table(glm.pred50, test.coach)
+
+lg.sp = c(lg.sp,specificity(conf.matrix))
+lg.sn = c(lg.sn,sensitivity(conf.matrix))
+}
+cv.error.5lg
+
+
+end.time <- Sys.time()
+time.taken <- end.time - start.time
+time.taken
+```
+
+
+```{r}
+mean(cv.error.5lg)
+sd(cv.error.5lg)
+boxplot(cv.error.5lg)
+```
+
+
+  ### 50
+
+```{r}
+start.time <- Sys.time()
+
+
+set.seed(17)
+cv.er.5lg50=rep(0,5)
+lg.sp50 <- NULL
+lg.sn50 <- NULL
+
+for (i in 1:5){
+glm.fits50 <- glm(wp01 ~  yards_gained+shotgun+no_huddle+qb_dropback+
+               qb_scramble+rush_attempt+pass_attempt+penalty_yards+
+               drive_play_count+drive_time_of_possession1+third_conversion1+
+               fourth_conversion1+timeout+penalty, data = train,
+               family=binomial("logit"),maxit=100)
+
+cv.er.5lg50[i]=cv.glm(train,glm.fits50,K=5)$delta[1]
+
+glm.probs50 <- predict(glm.fits50, test.year, type = "response")
+glm.pred50 <- rep(0, length(test.coach))
+glm.pred50[glm.probs50 > .5] <- 1
+conf.matrix<-table(glm.pred50, test.coach)
+
+lg.sp50 = c(lg.sp50,specificity(conf.matrix))
+lg.sn50 = c(lg.sn50,sensitivity(conf.matrix))
+  
+
+}
+cv.er.5lg50
+
+
+end.time <- Sys.time()
+time.taken <- end.time - start.time
+time.taken
+```
+
+
+```{r}
+mean(cv.er.5lg50)
+sd(cv.er.5lg50)
+boxplot(cv.er.5lg50)
+```
+
+
+
+
+##### KNN CV #####
+
+  ### ALL
+
+```{r}
+library(class)
+
+cv.er.knn.m = rep(0,10)
+cv.er.knn.sd = rep(0,10)
+knn.sp = NULL
+knn.sn = NULL
+
+for (i in 1: 10)
+{
+  start.time <- Sys.time()
+
+  ## K-fold Cross Validation for LDA
+  set.seed(17)
+  n_fold<-5; # number of cross validations #
+  rep(1:n_fold, length.out = nrow(coach)) 
+  
+  folds_i <- sample(rep(1:n_fold, length.out = nrow(coach))) ##without replacement
+  table(folds_i)
+  
+  knn.train <- cbind(coach$yards_gained,coach$shotgun,coach$no_huddle,
+                 coach$qb_dropback,coach$qb_scramble,coach$rush_attempt,
+                 coach$pass_attempt,coach$penalty_yards,coach$drive_play_count,
+                 coach$drive_time_of_possession1,coach$third_conversion1,
+                 coach$fourth_conversion1,coach$timeout,coach$penalty,coach$wp01)
+  knn.test <- as.matrix(knn.train)
+  
+  OUT.KNN=NULL
+  for (j in 1:n_fold)
+  {
+  test.ID <- which(folds_i == j)
+  train_X <- knn.train[-test.ID, 1:14]
+  train_Y <- knn.test[-test.ID, 15]
+  test_X <- knn.train[test.ID, 1:14]
+  test_Y <- knn.test[test.ID, 15]
+  knn.pred=knn(train_X, test_X, train_Y, k=i)
+  conf.matrix<-table(knn.pred,test_Y)
+  Accuracy=mean(knn.pred==test_Y)
+  
+  knn.sp = c(knn.sp,specificity(conf.matrix))
+  knn.sn = c(knn.sn,sensitivity(conf.matrix))
+  
+  OUT.KNN=c(OUT.KNN, Accuracy)
+  }
+  print(i)
+  print(OUT.KNN)
+  print(mean(OUT.KNN))
+  print(sd(OUT.KNN))
+  
+  cv.er.knn.m[i] = mean(OUT.KNN)
+  cv.er.knn.sd[i] = sd(OUT.KNN)
+  
+  end.time <- Sys.time()
+  time.taken <- end.time - start.time
+  print(time.taken)
+}
+
+```
+
+
+
+
+
+  ### 50 50
+
+
+```{r}
+library(class)
+
+cv.er.knn.m50 = rep(0,10)
+cv.er.knn.sd50 = rep(0,10)
+knn.sp50 = NULL
+knn.sn50 = NULL
+
+for (i in 1: 10)
+{
+  start.time <- Sys.time()
+
+  ## K-fold Cross Validation for LDA
+  set.seed(17)
+  n_fold<-5; # number of cross validations #
+  rep(1:n_fold, length.out = nrow(train)) 
+  
+  folds_i <- sample(rep(1:n_fold, length.out = nrow(train))) ##without replacement
+  table(folds_i)
+  
+  knn.train <- cbind(train$yards_gained,train$shotgun,train$no_huddle,
+                 train$qb_dropback,train$qb_scramble,train$rush_attempt,
+                 train$pass_attempt,train$penalty_yards,train$drive_play_count,
+                 train$drive_time_of_possession1,train$third_conversion1,
+                 train$fourth_conversion1,train$timeout,train$penalty,train$wp01)
+  knn.test <- as.matrix(knn.train)
+  
+  OUT.KNN=NULL
+  for (j in 1:n_fold)
+  {
+  test.ID <- which(folds_i == j)
+  train_X <- knn.train[-test.ID, 1:14]
+  train_Y <- knn.test[-test.ID, 15]
+  test_X <- knn.train[test.ID, 1:14]
+  test_Y <- knn.test[test.ID, 15]
+  knn.pred=knn(train_X, test_X, train_Y, k=i)
+  conf.matrix <- table(knn.pred,test_Y)
+  Accuracy=mean(knn.pred==test_Y)
+  
+  knn.sp50 = c(knn.sp50,specificity(conf.matrix))
+  knn.sn50 = c(knn.sn50,sensitivity(conf.matrix))
+  
+  OUT.KNN=c(OUT.KNN, Accuracy)
+  }
+  
+  print(i)
+  print(OUT.KNN)
+  print(mean(OUT.KNN))
+  print(sd(OUT.KNN))
+  
+  cv.er.knn.m50[i] = mean(OUT.KNN)
+  cv.er.knn.sd50[i] = sd(OUT.KNN)
+  
+  end.time <- Sys.time()
+  time.taken <- end.time - start.time
+  print(time.taken)
+}
+
+```
+
+
+
+##### Accuracy and Time Analysis #####
+
+```{r}
+acc.mean<- c(mean(cv.er.5lda),mean(cv.er.5lda50),mean(cv.er.5qda),
+              mean(cv.er.5qda50),mean(cv.error.5lg),mean(cv.er.5lg50),
+              mean(cv.er.knn.m),mean(cv.er.knn.m50))
+acc.mean
+barplot(acc.mean)
+```
+
+
+```{r}
+acc.sd<- c(sd(cv.er.5lda),sd(cv.er.5lda50),sd(cv.er.5qda),
+              sd(cv.er.5qda50),sd(cv.error.5lg),sd(cv.er.5lg50),
+              sd(cv.er.knn.sd),sd(cv.er.knn.sd50))
+acc.sd
+barplot(acc.sd)
+```
+
+
+```{r}
+#SENSITIVITY
+acc.sn<- c(mean(l.sn),mean(l.sn50),mean(q.sn),mean(q.sn50),mean(lg.sn),
+           mean(lg.sn50),mean(knn.sn),mean(knn.sn50))
+acc.sn
+barplot(acc.sn)
+```
+
+
+
+```{r}
+#SPECIFICITY
+acc.sp<- c(mean(l.sp),mean(l.sp50),mean(q.sp),mean(q.sp50),mean(lg.sp),
+           mean(lg.sp50),mean(knn.sp),mean(knn.sp50))
+acc.sp
+barplot(acc.sp)
+```
+
+
+
+
+
+
+```{r}
+acc.box<- c(cv.er.5lda,cv.er.5lda50,cv.er.5qda,cv.er.5qda50,
+             cv.error.5lg,cv.er.5lg50,cv.er.knn.m,cv.er.knn.m50)
+model <- c('LDA','LDA50','QDA','QDA50','LR','LR50','KNN','KNN',
+           'KNN50','KNN50')
+model<-rep(model, each = 5)
+
+boxplot(acc.box~model,main='Boxplot of Error Rate',xlab='Model Type',
+        ylab='Error Rate')
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
