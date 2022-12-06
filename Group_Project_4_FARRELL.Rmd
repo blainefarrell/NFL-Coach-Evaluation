@@ -1,5 +1,5 @@
 ---
-title: "Group Project 4"
+title: "Tree Model Classification"
 author: "Blaine Farrell"
 date: "2022-11-21"
 output: html_document
