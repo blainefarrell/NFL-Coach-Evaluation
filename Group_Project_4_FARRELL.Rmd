@@ -1,0 +1,551 @@
+---
+title: "Group Project 4"
+author: "Blaine Farrell"
+date: "2022-11-21"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r warning=FALSE}
+library(dplyr)
+library(tree)
+library(gbm)
+library(randomForest);
+library(tidyverse);
+library(ggplot2);
+library(RColorBrewer);
+library(MASS);
+library(knitr);
+library(kableExtra);
+library("papeR");
+library(epitab);
+library(caret);
+library(boot);
+library(BART);
+library('xgboost')
+myPalette <- brewer.pal(8, "Set2")
+```
+
+
+# Load in Dataset:
+```{r message=FALSE}
+coach <- read.csv("coach_dataset.csv")
+attach(coach)
+med<-median(coach$home_wp)
+coach$wp01 <- ifelse(coach$home_wp>med, 1, 0)
+coach <- subset(coach, select = -c(Group.1,home_wp))
+#coach$wp01 <- as.factor(coach$wp01)
+
+head(coach)
+```
+
+
+
+
+# Train Test Split: (using first 1000 rows)
+```{r}
+set.seed(5)
+
+#use 50% of the data for train and 50% for test
+sample <- sample(c(TRUE, FALSE), nrow(coach), replace=TRUE, prob=c(0.5,0.5))
+train <- coach[sample, ]
+test.data <- coach[!sample, ]
+dim(test.data)
+
+test.y <- test.data$wp01
+length(test.y)
+```
+
+
+# Classification Tree Model:.
+```{r}
+tree.coach <- tree(as.factor(wp01) ~ .,data=coach,subset=sample)
+tree.pred <- predict(tree.coach, test.data)[,2]
+tree.pred <- ifelse(tree.pred>0.5,1,0)
+table(tree.pred, test.y)
+mean(tree.pred == test.y)
+```
+
+
+```{r}
+start.time <- Sys.time()
+
+set.seed(5)
+folds <- sample(rep(1:5, length.out = nrow(coach)), size = nrow(coach), replace = F)
+tree.acc=NULL
+tree.sp <- NULL
+tree.sn <- NULL
+
+for (x in 1:5){ 
+  tree.coach <- tree(as.factor(wp01) ~ .,data=coach[folds != x, ])
+  tree.pred <- predict(tree.coach,  coach[folds == x,])[,2]
+  tree.pred <- ifelse(tree.pred>0.5,1,0)
+  conf.matrix <- table(tree.pred, coach$wp01[folds == x])
+  tree.acc <-c(tree.acc,mean(tree.pred == coach$wp01[folds == x]))
+  tree.sp <- c(tree.sp,specificity(conf.matrix))
+  tree.sn <-c(tree.sn,sensitivity(conf.matrix))
+  }
+
+print(tree.acc)
+print(tree.sp)
+print(tree.sn)
+
+end.time <- Sys.time()
+time.taken <- end.time - start.time
+time.taken
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# Boosting Model:
+```{r}
+set.seed(5)
+
+boost.coach <- gbm(wp01 ~ .,data=train,distribution ='bernoulli',
+                   n.trees = 1000,shrinkage = 0.01)
+
+pred.boost <- predict.gbm(object = boost.coach,
+                   newdata = test.data,
+                   n.trees = 1000, shrinkage = 0.01, 
+                   distribution = 'bernoulli')
+
+pred.boost <- as.factor(ifelse(pred.boost>0.5,1,0))
+
+table(pred.boost,test.y)
+mean(pred.boost == test.y)
+```
+
+
+  Summary of Feature Influence
+```{r}
+summary(boost.coach)
+```
+
+Timeouts, QB Scrambles, and Penalties seem to be the most important variables for Boosting.
+
+```{r}
+start.time <- Sys.time()
+
+set.seed(5)
+folds <- sample(rep(1:5, length.out = nrow(coach)), size = nrow(coach), replace = F)
+boost.acc=NULL
+boost.sp <- NULL
+boost.sn <- NULL
+
+for (x in 1:5){ 
+  boost.coach <- gbm(wp01 ~ .,data=coach[folds!=x,],distribution ='bernoulli',
+                   n.trees = 1000,shrinkage = 0.01)
+  pred.boost <- predict.gbm(object = boost.coach,newdata = coach[folds == x,],
+                   n.trees = 1000, shrinkage = 0.01,distribution = 'bernoulli')
+  pred.boost <- as.factor(ifelse(pred.boost>0.5,1,0))
+  conf.matrix <- table(pred.boost, coach$wp01[folds == x])
+  boost.acc <-c(boost.acc,mean(pred.boost == coach$wp01[folds == x]))
+  boost.sp <- c(boost.sp,specificity(conf.matrix))
+  boost.sn <-c(boost.sn,sensitivity(conf.matrix))
+  }
+
+print(boost.acc)
+print(boost.sp)
+print(boost.sn)
+
+end.time <- Sys.time()
+time.taken <- end.time - start.time
+time.taken
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# Bagging:
+```{r}
+suppressWarnings(bag.coach <- randomForest(wp01 ~ .,data=train,
+                                           norm.votes=TRUE,
+                                           probability=T))
+set.seed(5)
+b.pred0 <- predict(bag.coach, newdata = test.data)
+b.pred <- as.factor(ifelse(b.pred0>0.5,1,0))
+table(b.pred,test.y)
+mean(b.pred == test.y)
+```
+
+
+```{r}
+varImpPlot(bag.coach)
+```
+
+The most important features are Timeouts, Penalties, QB Scrambles, and No Huddles for Bagging.
+
+
+```{r}
+start.time <- Sys.time()
+
+set.seed(5)
+bag.acc=NULL
+bag.sp <- NULL
+bag.sn <- NULL
+
+for (x in 1:5){ 
+  suppressWarnings(bag.coach <- randomForest(wp01 ~ .,data=coach[folds!=x,],
+                                           norm.votes=TRUE,
+                                           probability=T))
+  bag.pred <- predict(bag.coach, newdata = coach[folds == x,])
+  bag.pred <- as.factor(ifelse(bag.pred>0.5,1,0))
+  conf.matrix <- table(bag.pred, coach$wp01[folds == x])
+  bag.acc <-c(bag.acc,mean(bag.pred == coach$wp01[folds == x]))
+  bag.sp <- c(bag.sp,specificity(conf.matrix))
+  bag.sn <-c(bag.sn,sensitivity(conf.matrix))
+  }
+
+print(bag.acc)
+print(bag.sp)
+print(bag.sn)
+
+end.time <- Sys.time()
+time.taken <- end.time - start.time
+time.taken
+```
+
+
+
+
+
+
+
+
+
+
+
+
+# Random Forest:
+```{r}
+suppressWarnings(rf.coach <- randomForest(wp01 ~ .,data=train,
+                                          norm.votes=TRUE,
+                                          mtry=ceiling(sqrt(14)),
+                                          probability=T))
+
+set.seed(5)
+rf.pred0 <- predict(rf.coach, newdata = test.data)
+rf.pred <- as.factor(ifelse(rf.pred0>0.5,1,0))
+table(rf.pred,test.y)
+mean(rf.pred == test.y)
+```
+
+
+```{r}
+varImpPlot(rf.coach)
+```
+
+The most important features are Timeouts, Penalties, QB Scrambles, and No Huddles for Bagging.
+
+
+```{r}
+start.time <- Sys.time()
+
+set.seed(5)
+rf.acc=NULL
+rf.sp <- NULL
+rf.sn <- NULL
+
+for (x in 1:5){ 
+  suppressWarnings(rf.coach <- randomForest(wp01 ~ .,data=coach[folds!=x,],
+                                          norm.votes=TRUE,
+                                          mtry=ceiling(sqrt(14)),
+                                          probability=T))
+  rf.pred <- predict(rf.coach, newdata = coach[folds == x,])
+  rf.pred <- as.factor(ifelse(rf.pred>0.5,1,0))
+  conf.matrix <- table(rf.pred, coach$wp01[folds == x])
+  rf.acc <-c(rf.acc,mean(rf.pred == coach$wp01[folds == x]))
+  rf.sp <- c(rf.sp,specificity(conf.matrix))
+  rf.sn <-c(rf.sn,sensitivity(conf.matrix))
+  }
+
+print(rf.acc)
+print(rf.sp)
+print(rf.sn)
+
+end.time <- Sys.time()
+time.taken <- end.time - start.time
+time.taken
+```
+
+
+
+
+
+
+
+
+
+
+# Prior Models:
+### LDA
+```{r}
+start.time <- Sys.time()
+
+set.seed(5)
+lda.acc=NULL
+lda.sp <- NULL
+lda.sn <- NULL
+
+for (x in 1:5){ 
+  lda.fit <- lda(wp01 ~ ., data = coach[folds!=x,])
+  lda.pred <- predict(lda.fit, newdata = coach[folds == x,])$class
+  #lda.pred <- as.factor(ifelse(lda.pred0>0.5,1,0))
+  conf.matrix <- table(lda.pred, coach$wp01[folds == x])
+  lda.acc <-c(lda.acc,mean(lda.pred == coach$wp01[folds == x]))
+  lda.sp <- c(lda.sp,specificity(conf.matrix))
+  lda.sn <-c(lda.sn,sensitivity(conf.matrix))
+  }
+
+print(lda.acc)
+print(lda.sp)
+print(lda.sn)
+
+end.time <- Sys.time()
+time.taken <- end.time - start.time
+time.taken
+```
+
+
+
+### QDA
+```{r}
+start.time <- Sys.time()
+
+set.seed(5)
+qda.acc=NULL
+qda.sp <- NULL
+qda.sn <- NULL
+
+for (x in 1:5){ 
+  qda.fit <- qda(wp01 ~ ., data = coach[folds!=x,])#,family=binomial)
+  qda.pred <- predict(qda.fit, newdata = coach[folds == x,])$class
+  conf.matrix <- table(qda.pred, coach$wp01[folds == x])
+  qda.acc <-c(qda.acc,mean(qda.pred == coach$wp01[folds == x]))
+  qda.sp <- c(qda.sp,specificity(conf.matrix))
+  qda.sn <-c(qda.sn,sensitivity(conf.matrix))
+  }
+
+print(qda.acc)
+print(qda.sp)
+print(qda.sn)
+
+end.time <- Sys.time()
+time.taken <- end.time - start.time
+time.taken
+```
+
+### Logistic Regression
+```{r}
+start.time <- Sys.time()
+
+set.seed(5)
+lg.acc=NULL
+lg.sp <- NULL
+lg.sn <- NULL
+
+for (x in 1:5){ 
+  lg.fit <- glm(wp01 ~ ., data = coach[folds!=x,],family=binomial)
+  lg.pred <- predict(lg.fit, newdata = coach[folds == x,])
+  lg.pred <- as.factor(ifelse(lg.pred>0.5,1,0))
+  conf.matrix <- table(lg.pred, coach$wp01[folds == x])
+  lg.acc <-c(lg.acc,mean(lg.pred == coach$wp01[folds == x]))
+  lg.sp <- c(lg.sp,specificity(conf.matrix))
+  lg.sn <-c(lg.sn,sensitivity(conf.matrix))
+  }
+
+print(lg.acc)
+print(lg.sp)
+print(lg.sn)
+
+end.time <- Sys.time()
+time.taken <- end.time - start.time
+time.taken
+```
+
+### KNN
+```{r}
+library(class)
+
+start.time <- Sys.time()
+
+set.seed(5)
+knn.acc=NULL
+knn.sp <- NULL
+knn.sn <- NULL
+
+for (x in 1:5){ 
+  knn.fit <- knn(train = coach[folds!=x,],
+                      test = coach[folds == x,],
+                      cl = coach[folds!=x,]$wp01,
+                      k = 8)
+  #misClassError <- mean(classifier_knn != test_cl$Species)
+  conf.matrix <- table(knn.fit, coach[folds == x,]$wp01)
+  knn.acc <-c(knn.acc,mean(knn.fit == coach[folds == x,]$wp01))
+  knn.sp <- c(knn.sp,specificity(conf.matrix))
+  knn.sn <-c(knn.sn,sensitivity(conf.matrix))
+  }
+
+print(knn.acc)
+print(knn.sp)
+print(knn.sn)
+
+end.time <- Sys.time()
+time.taken <- end.time - start.time
+time.taken
+
+```
+
+
+
+
+
+
+# XGBoost:
+```{r}
+start.time <- Sys.time()
+
+set.seed(5)
+xg.acc=NULL
+xg.sp <- NULL
+xg.sn <- NULL
+
+for (x in 1:5){ 
+  xg.coach <- xgboost(data=as.matrix(coach[folds!=x,]),
+                      label=coach[folds!=x,]$wp01,
+                      max.depth=2,eta=1,nround=2,nthread=2,
+                      objective="binary:logistic")
+  xg.pred <- predict(xg.coach, newdata = as.matrix(coach[folds == x,]))
+  xg.pred <- as.factor(ifelse(xg.pred>0.5,1,0))
+  conf.matrix <- table(xg.pred, coach$wp01[folds == x])
+  xg.acc <-c(xg.acc,mean(xg.pred == coach$wp01[folds == x]))
+  xg.sp <- c(xg.sp,specificity(conf.matrix))
+  xg.sn <-c(xg.sn,sensitivity(conf.matrix))
+  }
+
+print(xg.acc)
+print(xg.sp)
+print(xg.sn)
+
+end.time <- Sys.time()
+time.taken <- end.time - start.time
+time.taken
+```
+
+
+```{r}
+cccccc <- subset(coach,select=-c(wp01,drive_time_of_possession1))
+cccccc$drive_time<-coach$drive_time_of_possession1
+xg.coach2 <- xgboost(data=as.matrix(cccccc[folds!=1,]),
+                      label=coach[folds!=1,]$wp01,
+                      max.depth=2,eta=1,nround=2,nthread=2,
+                      objective="binary:logistic")
+feat.imp<-xgb.importance(colnames(cccccc),model=xg.coach2)
+barplot(feat.imp$Gain,names.arg=feat.imp$Feature,
+        main="XGBoost Feature Importance",xlab="Variable",
+        ylab="Feature Importance",col=myPalette)
+```
+
+
+
+
+# Analysis of Results:
+```{r}
+acc.box<- c(tree.acc,boost.acc,bag.acc,rf.acc,lda.acc,qda.acc,
+            lg.acc,knn.acc,xg.acc)
+model<- c('Dec Tree','Boost','Bagging','Rand For','LDA','QDA',
+          'Log Reg','KNN=8','XGBoost')
+model<-rep(model, each = 5)
+
+boxplot(acc.box~model,main='Boxplot of Model Accuracy',xlab='Model Type',
+        ylab='Accuracy (Percentage)',col = c("blue", "green","hotpink"),las=2)
+```
+
+WOW! Look at XGBoost!
+
+```{r}
+acc.mean <- c(mean(tree.acc),mean(boost.acc),mean(bag.acc),mean(rf.acc),
+              mean(lda.acc),mean(qda.acc),mean(lg.acc),mean(knn.acc),
+              mean(xg.acc))
+acc.sd <- c(sd(tree.acc),sd(boost.acc),sd(bag.acc),sd(rf.acc),
+               sd(lda.acc),sd(qda.acc),sd(lg.acc),sd(knn.acc),
+               sd(xg.acc))
+mod.name<- c('Dec Tree','Boost','Bagging','Rand For','LDA','QDA',
+          'Log Reg','KNN=8','XGBoost')
+
+bar.acc<-data.frame(acc.mean,acc.sd,row.names=mod.name)
+head(bar.acc)
+```
+
+```{r}
+barplot(t(as.matrix(bar.acc)),
+        main='Model Accuracy and Standard Deviation',
+        xlab='Model Type',ylab='Percentage',
+        legend.text =T,
+        args.legend = list(x = "topleft",
+                           legend=c("Accuracy","Standard Deviation")),
+        beside=T,las=2,col=c('blue','purple'))
+```
+
+
+
+
+
+```{r}
+spec.data <- c(mean(tree.sp),mean(boost.sp),mean(bag.sp),mean(rf.sp),
+                mean(lda.sp),mean(qda.sp),mean(lg.sp),mean(knn.sp),mean(xg.sp))
+sens.data <- c(mean(tree.sn),mean(boost.sn),mean(bag.sn),mean(rf.sn),
+                mean(lda.sn),mean(qda.sn),mean(lg.sn),mean(knn.sn),mean(xg.sn))
+mod.name<- c('Dec Tree','Boost','Bagging','Rand For','LDA','QDA',
+          'Log Reg','KNN=8','XGBoost')
+
+ss.list<-data.frame(spec.data,sens.data,row.names=mod.name)
+head(ss.list)
+```
+
+```{r}
+barplot(t(as.matrix(ss.list)),
+        main='Specificity and Sensitivity',
+        xlab='Model Type',ylab='Percentage',
+        legend.text =T,
+        args.legend = list(x = "bottomright",
+                           legend=c("Specificty","Sensitivity")),
+        beside=T,las=2,col=c('red','green'))
+```
+
+
+
+
+
+
+
+
+
